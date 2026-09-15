@@ -362,8 +362,8 @@ def handle_message_events(body, say, logger):
             # Upload to Slack
             say("📤 Uploading report to Slack...")
             with open(doc_path, 'rb') as f:
-                app.client.files_upload(
-                    channels=channel,
+                app.client.files_upload_v2(
+                    channel=channel,
                     file=f,
                     filename=filename,
                     title=f"Contact Report: {workflow.client_name}",
