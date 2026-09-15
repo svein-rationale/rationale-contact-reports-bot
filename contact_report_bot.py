@@ -377,78 +377,8 @@ def handle_contact_report_command(ack, body, say):
     say(f"📋 Starting Contact Report for: *{workflow.client_name}*\n\n"
         f"Step 1/5: What's the project name?")
 
-@app.event("message")
-def handle_message_events(body, say, logger):
-    """Handle message events including file uploads"""
-    message = body.get("event", {})
-    
-    # Skip bot messages
-    if message.get("bot_id"):
-        return
-    
-    # Handle file uploads
-    if message.get("subtype") == "file_share":
-        handle_file_upload(message, say, logger)
-        return
-    
-    # Skip non-text messages
-    if not message.get("text"):
-        return
-    
-    # Handle text responses in workflow
-    user_id = message.get("user")
-    channel = message.get("channel")
-    text = message.get("text", "").strip()
-    
-    workflow_key = f"{user_id}_{channel}"
-    if workflow_key not in active_workflows:
-        return
-    
-    workflow = active_workflows[workflow_key]
-    
-    # State machine for workflow
-    if workflow.state == "awaiting_project_name":
-        workflow.project_name = text
-        workflow.state = "awaiting_attendees"
-        say("Step 2/5: Who attended the meeting? (names, comma-separated)")
-    
-    elif workflow.state == "awaiting_attendees":
-        workflow.attendees = [name.strip() for name in text.split(",")]
-        workflow.state = "awaiting_am"
-        
-        # Show AM options
-        am_list = "\n".join([f"• {am}" for am in TEAM_DATA["account_managers"]])
-        say(f"Step 3/5: Who's the Project AM?\n{am_list}")
-    
-    elif workflow.state == "awaiting_am":
-        workflow.project_am = text
-        workflow.state = "awaiting_oversight"
-        
-        # Show senior oversight options
-        oversight_list = "\n".join([f"• {so}" for so in TEAM_DATA["senior_oversight"]])
-        say(f"Step 4/5: Who's Senior Oversight?\n{oversight_list}")
-    
-    elif workflow.state == "awaiting_oversight":
-        workflow.senior_oversight = text
-        workflow.state = "awaiting_context"
-        say("Step 5/5: Any other context? (e.g., budget, timeline, key concerns)\n"
-            "Type 'none' or 'no' if there's nothing to add.")
-    
-    elif workflow.state == "awaiting_context":
-        workflow.context = text if text.lower() not in ["none", "no", "nope"] else ""
-        workflow.state = "awaiting_file"
-        say("✅ Got it! Now upload the meeting file:\n"
-            "📁 MP3 / MP4 (I'll transcribe it)\n"
-            "📄 DOCX (I'll extract the text)\n\n"
-            "Just drag & drop or attach the file.")
-
-Then click Commit changes.
-
-This changes the decorator from @app.message() to @app.event("message"), which properly handles both text AND file_share events.
-
-Once committed, Railway redeploys and try the file upload again!
-
-Write a message
+@app.message(re=r".*")
+def handle_message_events(message, say, logger):
     """Handle message events including file uploads"""
     
     # Skip bot messages
