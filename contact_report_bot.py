@@ -333,15 +333,35 @@ def generate_contact_report(workflow, say):
 
 def transcribe_audio(file_path):
     """
-    Transcribe audio file (MP3/MP4) using Claude API
-    NOTE: Claude API doesn't natively transcribe. You'd need:
-    - Whisper API (OpenAI)
-    - Or a separate transcription service
-    For now, returning a placeholder
+    Transcribe audio file (MP3/MP4) using Google Cloud Speech-to-Text
     """
-    # TODO: Integrate with Whisper API or another transcription service
-    # For MVP, you could use Whisper via API
-    return "Audio transcription would happen here"
+    from google.cloud import speech
+    import io
+    
+    # Initialize Speech-to-Text client
+    client = speech.SpeechClient()
+    
+    # Read audio file
+    with io.open(file_path, "rb") as audio_file:
+        content = audio_file.read()
+    
+    # Prepare audio config
+    audio = speech.RecognitionAudio(content=content)
+    config = speech.RecognitionConfig(
+        encoding=speech.RecognitionConfig.AudioEncoding.MP3,
+        sample_rate_hertz=16000,
+        language_code="en-US",
+    )
+    
+    # Transcribe
+    response = client.recognize(config=config, audio=audio)
+    
+    # Extract transcript
+    transcript = ""
+    for result in response.results:
+        transcript += result.alternatives[0].transcript + " "
+    
+    return transcript.strip() if transcript else "No speech detected in audio"
 
 def extract_docx_text(file_path):
     """Extract text from DOCX file"""
