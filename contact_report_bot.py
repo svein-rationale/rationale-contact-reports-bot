@@ -210,16 +210,36 @@ Respond ONLY with valid JSON in this format:
 
 def create_word_document(workflow, report_data):
     """Create branded Word document with logo and improved formatting"""
+    from docx.shared import Pt
     try:
         doc = Document()
         
-        # Add logo at top
-        logo_path = "/mnt/user-data/outputs/rationale_logo.png"
-        if os.path.exists(logo_path):
-            logo_paragraph = doc.add_paragraph()
-            logo_run = logo_paragraph.add_run()
-            logo_run.add_picture(logo_path, width=1500000)  # 1.5 inches
-            logo_paragraph.alignment = 0  # Left align
+        # Try to add logo - check multiple possible locations
+        logo_found = False
+        possible_logo_paths = [
+            "/mnt/user-data/outputs/rationale_logo.png",
+            "/app/rationale_logo.png",
+            "./rationale_logo.png",
+            "rationale_logo.png"
+        ]
+        
+        for logo_path in possible_logo_paths:
+            if os.path.exists(logo_path):
+                try:
+                    logo_paragraph = doc.add_paragraph()
+                    logo_run = logo_paragraph.add_run()
+                    logo_run.add_picture(logo_path, width=1500000)  # 1.5 inches
+                    logo_paragraph.alignment = 0  # Left align
+                    logo_paragraph.paragraph_format.space_after = Pt(12)
+                    logo_found = True
+                    logger.info(f"Logo added from: {logo_path}")
+                    break
+                except Exception as e:
+                    logger.warning(f"Could not add logo from {logo_path}: {str(e)}")
+                    continue
+        
+        if not logo_found:
+            logger.warning("Logo file not found in any expected location")
         
         doc.add_paragraph()
         
@@ -261,22 +281,28 @@ def create_word_document(workflow, report_data):
         bg_para = notes_cell.paragraphs[0]
         bg_run = bg_para.add_run("Background")
         bg_run.bold = True
+        bg_para.paragraph_format.space_after = Pt(6)
         
-        # Add background text with proper breaks
+        # Add background text with proper breaks and spacing
         for line in bg.split('. '):
             if line.strip():
-                notes_cell.add_paragraph(line.strip() + '.', style='Normal')
+                para = notes_cell.add_paragraph(line.strip() + '.', style='Normal')
+                para.paragraph_format.space_after = Pt(6)
+        
+        # Add spacing before The Ask
+        notes_cell.add_paragraph()
         
         # Add The Ask
-        notes_cell.add_paragraph()
         ask_para = notes_cell.add_paragraph()
         ask_run = ask_para.add_run("The Ask")
         ask_run.bold = True
+        ask_para.paragraph_format.space_after = Pt(6)
         
-        # Add ask text with proper breaks
+        # Add ask text with proper breaks and spacing
         for line in ask.split('. '):
             if line.strip():
-                notes_cell.add_paragraph(line.strip() + '.', style='Normal')
+                para = notes_cell.add_paragraph(line.strip() + '.', style='Normal')
+                para.paragraph_format.space_after = Pt(6)
         
         doc.add_paragraph()
         
@@ -295,9 +321,11 @@ def create_word_document(workflow, report_data):
             for action in actions:
                 action_text = str(action).strip()
                 if action_text:
-                    actions_cell.add_paragraph(action_text, style='List Bullet')
+                    para = actions_cell.add_paragraph(action_text, style='List Bullet')
+                    para.paragraph_format.space_after = Pt(8)
         else:
-            actions_cell.add_paragraph("Action items to be determined", style='List Bullet')
+            para = actions_cell.add_paragraph("Action items to be determined", style='List Bullet')
+            para.paragraph_format.space_after = Pt(8)
         
         doc.add_paragraph()
         
@@ -316,9 +344,11 @@ def create_word_document(workflow, report_data):
             for point in key_points:
                 point_text = str(point).strip()
                 if point_text:
-                    key_points_cell.add_paragraph(point_text, style='List Bullet')
+                    para = key_points_cell.add_paragraph(point_text, style='List Bullet')
+                    para.paragraph_format.space_after = Pt(8)
         else:
-            key_points_cell.add_paragraph("Key discussion points", style='List Bullet')
+            para = key_points_cell.add_paragraph("Key discussion points", style='List Bullet')
+            para.paragraph_format.space_after = Pt(8)
         
         doc.add_paragraph()
         
