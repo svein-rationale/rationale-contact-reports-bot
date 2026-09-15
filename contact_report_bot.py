@@ -169,12 +169,21 @@ Respond ONLY in JSON format:
             messages=[{"role": "user", "content": prompt}]
         )
         
-        response_text = message.content[0].text
-        json_start = response_text.find('{')
-        json_end = response_text.rfind('}') + 1
-        if json_start >= 0 and json_end > json_start:
-            json_str = response_text[json_start:json_end]
-            return json.loads(json_str)
+        if not message.content or not message.content[0].text:
+    raise Exception("Empty response from Claude")
+
+response_text = message.content[0].text
+if not response_text:
+    raise Exception("No text in response")
+
+json_start = response_text.find('{')
+json_end = response_text.rfind('}') + 1
+if json_start >= 0 and json_end > json_start:
+    json_str = response_text[json_start:json_end]
+    try:
+        return json.loads(json_str)
+    except json.JSONDecodeError:
+        pass
         
         return {
             "background": "Meeting analysis",
