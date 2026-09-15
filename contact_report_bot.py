@@ -1,6 +1,6 @@
 """
 Claude Contact Reports Bot for Slack
-Generates professional contact reports from meeting files using Claude AI
+Generates professional contact reports and posts them directly to Slack
 Supports: DOCX, PDF, TXT files
 """
 
@@ -13,8 +13,6 @@ from flask import Flask, request
 from slack_bolt import App
 from slack_bolt.adapter.flask import SlackRequestHandler
 from anthropic import Anthropic
-from google.oauth2.service_account import Credentials
-from googleapiclient import discovery
 from docx import Document
 import logging
 
@@ -182,51 +180,25 @@ Respond ONLY with valid JSON in this format:
             ]
         )
         
-        # Debug: Log the response structure
-        logger.info(f"Claude response type: {type(message)}")
-        logger.info(f"Claude content: {message.content}")
+        if not message.content:
+            raise Exception("Empty response from Claude")
         
-        # Extract text from response
-        response_text = None
-        if message.content:
-            logger.info(f"Content length: {len(message.content)}")
-            for i, block in enumerate(message.content):
-                logger.info(f"Block {i}: type={type(block)}, has_text={hasattr(block, 'text')}")
-                if hasattr(block, 'text') and block.text:
-                    response_text = block.text
-                    logger.info(f"Found text in block {i}: {response_text[:100]}...")
-                    break
-        
-        # If no text found, try to use the first block as string
-        if not response_text and message.content:
-            try:
-                response_text = str(message.content[0])
-                logger.info(f"Using str() conversion: {response_text[:100]}...")
-            except:
-                pass
-        
+        response_text = message.content[0].text
         if not response_text:
-            logger.error("Could not extract any text from Claude response")
-            raise Exception("No text extracted from Claude response")
+            raise Exception("No text in Claude response")
         
         # Parse JSON from response
         json_start = response_text.find('{')
         json_end = response_text.rfind('}') + 1
         
         if json_start < 0 or json_end <= json_start:
-            logger.error(f"Could not find JSON. Response text: {response_text[:200]}")
             raise Exception("Could not find JSON in response")
         
         json_str = response_text[json_start:json_end]
-        logger.info(f"Extracted JSON: {json_str[:200]}...")
-        
         return json.loads(json_str)
         
-    except json.JSONDecodeError as e:
-        logger.error(f"JSON parsing error: {str(e)}")
-        raise
     except Exception as e:
-        logger.error(f"Claude API error: {str(e)}")
+        logger.error(f"Claude error: {str(e)}")
         raise
 
 
@@ -259,7 +231,7 @@ def create_word_document(workflow, report_data):
         
         # Meeting notes section
         doc.add_heading("Meeting Notes", level=2)
-        doc.add_paragraph("[Meeting notes and transcript extracted]")
+        doc.add_paragraph("[Meeting transcript extracted and analyzed]")
         
         # Background section
         doc.add_heading("Background", level=2)
@@ -299,70 +271,9 @@ def create_word_document(workflow, report_data):
         doc_path = os.path.join(temp_dir, filename)
         doc.save(doc_path)
         
-        return doc_path
+        return doc_path, filename
     except Exception as e:
         logger.error(f"Document creation error: {str(e)}")
-        raise
-
-
-def get_google_drive_service():
-    """Get authorized Google Drive service"""
-    try:
-        credentials_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
-        if not credentials_json:
-            raise Exception("Google credentials not found in environment")
-        
-        credentials_dict = json.loads(credentials_json)
-        credentials = Credentials.from_service_account_info(
-            credentials_dict,
-            scopes=['https://www.googleapis.com/auth/drive']
-        )
-        service = discovery.build('drive', 'v3', credentials=credentials)
-        return service
-    except Exception as e:
-        logger.error(f"Drive service error: {str(e)}")
-        raise
-
-
-def upload_to_google_drive(doc_path, workflow):
-    """Upload document to Google Drive"""
-    try:
-        service = get_google_drive_service()
-        
-        # Find Contact Reports folder
-        results = service.files().list(
-            q="name='Contact Reports' and mimeType='application/vnd.google-apps.folder'",
-            spaces='drive',
-            fields='files(id)',
-            pageSize=1
-        ).execute()
-        
-        folders = results.get('files', [])
-        if not folders:
-            raise Exception("Contact Reports folder not found in Google Drive")
-        
-        folder_id = folders[0]['id']
-        
-        # Upload file
-        file_metadata = {
-            'name': os.path.basename(doc_path),
-            'parents': [folder_id]
-        }
-        
-        media = discovery.MediaFileUpload(
-            doc_path,
-            mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-        )
-        
-        file = service.files().create(
-            body=file_metadata,
-            media_body=media,
-            fields='id, webViewLink'
-        ).execute()
-        
-        return file.get('webViewLink')
-    except Exception as e:
-        logger.error(f"Drive upload error: {str(e)}")
         raise
 
 
@@ -440,17 +351,18 @@ def handle_message_events(body, say, logger):
             report_data = generate_report_with_claude(content, workflow)
             
             say("📝 Creating Word document...")
-            doc_path = create_word_document(workflow, report_data)
+            doc_path, filename = create_word_document(workflow, report_data)
             
-            say("☁️ Uploading to Google Drive...")
-            drive_link = upload_to_google_drive(doc_path, workflow)
-            
-            # Success!
-            attendee = workflow.attendees[0] if workflow.attendees else "Meeting"
-            say(f"✅ Contact Report Generated\n\n"
-                f"📋 {attendee} | {workflow.client_name}\n"
-                f"📅 {workflow.project_name}\n\n"
-                f"<{drive_link}|📁 View Report in Google Drive>")
+            # Upload to Slack
+            say("📤 Uploading report to Slack...")
+            with open(doc_path, 'rb') as f:
+                app.client.files_upload(
+                    channels=channel,
+                    file=f,
+                    filename=filename,
+                    title=f"Contact Report: {workflow.client_name}",
+                    initial_comment=f"✅ Contact Report Generated\n\n📋 {workflow.attendees[0] if workflow.attendees else 'Meeting'} | {workflow.client_name}\n📅 {workflow.project_name}"
+                )
             
             # Cleanup
             del active_workflows[workflow_key]
