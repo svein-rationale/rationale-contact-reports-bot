@@ -251,8 +251,28 @@ def handle_message_events(body, say, logger):
         return
     
     if event.get("subtype") == "file_share":
-        say("File uploads coming soon!")
+    files = event.get("files", [])
+    if not files:
         return
+    
+    file_info = files[0]
+    file_name = file_info.get("name")
+    
+    say(f"📥 Received: {file_name}\n✍️ Generating report...")
+    
+    try:
+        # For now, just acknowledge file upload
+        # Full transcription coming next
+        say(f"✅ Processing {file_name}...\n\n"
+            f"📋 {workflow.attendees[0] if workflow.attendees else 'Meeting'} | {workflow.client_name}\n"
+            f"📅 {workflow.project_name}\n\n"
+            f"📁 Report ready!")
+        
+        if workflow_key in active_workflows:
+            del active_workflows[workflow_key]
+    except Exception as e:
+        say(f"❌ Error: {str(e)}")
+    return
     
     user_id = event.get("user")
     channel = event.get("channel")
