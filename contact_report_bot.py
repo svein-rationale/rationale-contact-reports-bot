@@ -128,10 +128,9 @@ def handle_contact_report_command(ack, body, say):
     
     # Start the workflow: ask for project name
     say(
-        f"📋 Starting Contact Report for: *{workflow.client_name}*\n\n"
-        f"Step 1/5: What's the project name?",
-        thread_ts=body.get("response_url")
-    )
+    f"📋 Starting Contact Report for: *{workflow.client_name}*\n\n"
+    f"Step 1/5: What's the project name?"
+)
 
 @slack_app.message()
 def handle_messages(message, say):
