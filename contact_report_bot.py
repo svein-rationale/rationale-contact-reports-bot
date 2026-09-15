@@ -209,12 +209,18 @@ Respond ONLY with valid JSON in this format:
 
 
 def create_word_document(workflow, report_data):
-    """Create branded Word document matching template layout"""
+    """Create branded Word document with logo and improved formatting"""
     try:
         doc = Document()
         
-        # Add some spacing
-        doc.add_paragraph()
+        # Add logo at top
+        logo_path = "/mnt/user-data/outputs/rationale_logo.png"
+        if os.path.exists(logo_path):
+            logo_paragraph = doc.add_paragraph()
+            logo_run = logo_paragraph.add_run()
+            logo_run.add_picture(logo_path, width=1500000)  # 1.5 inches
+            logo_paragraph.alignment = 0  # Left align
+        
         doc.add_paragraph()
         
         # TABLE 1: Header info (2 rows, 3 cols)
@@ -243,11 +249,34 @@ def create_word_document(workflow, report_data):
         
         notes_table.rows[0].cells[0].text = "Meeting notes"
         
-        # Build content for row 2
+        # Build formatted content for Background and The Ask
         bg = report_data.get("background", "")
         ask = report_data.get("the_ask", "")
-        notes_content = f"Background\n\n{bg}\n\nThe Ask\n\n{ask}"
-        notes_table.rows[1].cells[0].text = notes_content
+        
+        # Build the content with better spacing
+        notes_cell = notes_table.rows[1].cells[0]
+        notes_cell.text = ""  # Clear default text
+        
+        # Add Background
+        bg_para = notes_cell.paragraphs[0]
+        bg_run = bg_para.add_run("Background")
+        bg_run.bold = True
+        
+        # Add background text with proper breaks
+        for line in bg.split('. '):
+            if line.strip():
+                notes_cell.add_paragraph(line.strip() + '.', style='Normal')
+        
+        # Add The Ask
+        notes_cell.add_paragraph()
+        ask_para = notes_cell.add_paragraph()
+        ask_run = ask_para.add_run("The Ask")
+        ask_run.bold = True
+        
+        # Add ask text with proper breaks
+        for line in ask.split('. '):
+            if line.strip():
+                notes_cell.add_paragraph(line.strip() + '.', style='Normal')
         
         doc.add_paragraph()
         
@@ -258,12 +287,17 @@ def create_word_document(workflow, report_data):
         actions_table.rows[0].cells[0].text = "Actions"
         
         # Build actions content
+        actions_cell = actions_table.rows[1].cells[0]
+        actions_cell.text = ""  # Clear default text
+        
         actions = report_data.get("actions", [])
         if actions and isinstance(actions, list):
-            actions_content = "\n".join([f"• {str(action)}" for action in actions])
+            for action in actions:
+                action_text = str(action).strip()
+                if action_text:
+                    actions_cell.add_paragraph(action_text, style='List Bullet')
         else:
-            actions_content = "• Action items to be determined"
-        actions_table.rows[1].cells[0].text = actions_content
+            actions_cell.add_paragraph("Action items to be determined", style='List Bullet')
         
         doc.add_paragraph()
         
@@ -274,12 +308,17 @@ def create_word_document(workflow, report_data):
         key_points_table.rows[0].cells[0].text = "Key Points"
         
         # Build key points content
+        key_points_cell = key_points_table.rows[1].cells[0]
+        key_points_cell.text = ""  # Clear default text
+        
         key_points = report_data.get("key_points", [])
         if key_points and isinstance(key_points, list):
-            key_points_content = "\n".join([f"• {str(point)}" for point in key_points])
+            for point in key_points:
+                point_text = str(point).strip()
+                if point_text:
+                    key_points_cell.add_paragraph(point_text, style='List Bullet')
         else:
-            key_points_content = "• Key discussion points"
-        key_points_table.rows[1].cells[0].text = key_points_content
+            key_points_cell.add_paragraph("Key discussion points", style='List Bullet')
         
         doc.add_paragraph()
         
