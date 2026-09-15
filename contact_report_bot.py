@@ -13,7 +13,8 @@ from flask import Flask, request
 from slack_bolt import App
 from slack_bolt.adapter.flask import SlackRequestHandler
 from anthropic import Anthropic
-from docx import Document
+from google.oauth2.service_account import Credentials
+from googleapiclient import discovery
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -211,159 +212,161 @@ Respond ONLY with valid JSON in this format:
         raise
 
 
-def create_word_document(workflow, report_data):
-    """Create branded Word document with embedded logo and improved formatting"""
-    import base64
-    from docx.shared import Pt
+def create_google_doc(workflow, report_data):
+    """Create a Google Doc and save to Drive"""
     try:
-        doc = Document()
+        service = get_google_drive_service()
+        docs_service = discovery.build('docs', 'v1', credentials=Credentials.from_service_account_info(
+            json.loads(os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")),
+            scopes=['https://www.googleapis.com/auth/documents', 'https://www.googleapis.com/auth/drive']
+        ))
         
-        # Add embedded logo
-        try:
-            logo_bytes = base64.b64decode(RATIONALE_LOGO_BASE64)
-            temp_logo = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
-            temp_logo.write(logo_bytes)
-            temp_logo.close()
-            
-            logo_paragraph = doc.add_paragraph()
-            logo_run = logo_paragraph.add_run()
-            logo_run.add_picture(temp_logo.name, width=1500000)  # 1.5 inches
-            logo_paragraph.alignment = 0  # Left align
-            logo_paragraph.paragraph_format.space_after = Pt(12)
-            
-            # Cleanup temp file
-            os.unlink(temp_logo.name)
-            logger.info("Logo added successfully")
-        except Exception as e:
-            logger.warning(f"Could not add logo: {str(e)}")
+        # Create document title
+        doc_title = f"{datetime.now().strftime('%Y-%m-%d')} - {workflow.client_name} - Contact Report"
         
-        doc.add_paragraph()
+        # Create the document
+        body = {
+            'title': doc_title
+        }
+        doc = docs_service.documents().create(body=body).execute()
+        doc_id = doc['documentId']
         
-        # TABLE 1: Header info (2 rows, 3 cols)
-        header_table = doc.add_table(rows=2, cols=3)
-        header_table.style = 'Table Grid'
+        # Find Contact Reports folder
+        results = service.files().list(
+            q="name='Contact Reports' and mimeType='application/vnd.google-apps.folder'",
+            spaces='drive',
+            fields='files(id)',
+            pageSize=1
+        ).execute()
         
-        # Row 1: Client, Project Name, Meeting
-        row1_cells = header_table.rows[0].cells
-        row1_cells[0].text = f"Client:\n{workflow.client_name}"
-        row1_cells[1].text = f"Project Name:\n{workflow.project_name or 'N/A'}"
-        meeting_date = datetime.now().strftime("%d/%m/%Y")
-        attendees_str = ", ".join(workflow.attendees) if workflow.attendees else "N/A"
-        row1_cells[2].text = f"Meeting:\n[{meeting_date} & {attendees_str}]"
+        folders = results.get('files', [])
+        if folders:
+            folder_id = folders[0]['id']
+            # Move document to folder
+            service.files().update(
+                fileId=doc_id,
+                addParents=folder_id,
+                fields='id, parents'
+            ).execute()
         
-        # Row 2: Project AM, Senior Oversight, Meeting
-        row2_cells = header_table.rows[1].cells
-        row2_cells[0].text = f"Project AM:\n{workflow.project_am or 'N/A'}"
-        row2_cells[1].text = f"Senior Oversight:\n{workflow.senior_oversight or 'N/A'}"
-        row2_cells[2].text = f"Meeting:\n[Date & Attendees]"
+        # Build requests to insert content
+        requests = []
         
-        doc.add_paragraph()
+        # Add title
+        requests.append({
+            'insertText': {
+                'text': doc_title + '\n\n'
+            }
+        })
         
-        # TABLE 2: Meeting Notes & Background & The Ask (2 rows, 1 col)
-        notes_table = doc.add_table(rows=2, cols=1)
-        notes_table.style = 'Table Grid'
-        
-        notes_table.rows[0].cells[0].text = "Meeting notes"
-        
-        # Build formatted content for Background and The Ask
-        bg = report_data.get("background", "")
-        ask = report_data.get("the_ask", "")
-        
-        # Build the content with better spacing
-        notes_cell = notes_table.rows[1].cells[0]
-        notes_cell.text = ""  # Clear default text
+        # Add metadata table content
+        requests.append({
+            'insertText': {
+                'text': f"Client: {workflow.client_name}\nProject: {workflow.project_name or 'N/A'}\nMeeting: {datetime.now().strftime('%d/%m/%Y')} | {', '.join(workflow.attendees) if workflow.attendees else 'N/A'}\nProject AM: {workflow.project_am or 'N/A'}\nSenior Oversight: {workflow.senior_oversight or 'N/A'}\n\n"
+            }
+        })
         
         # Add Background
-        bg_para = notes_cell.paragraphs[0]
-        bg_run = bg_para.add_run("Background")
-        bg_run.bold = True
-        bg_para.paragraph_format.space_after = Pt(6)
-        
-        # Add background text with proper breaks and spacing
+        requests.append({
+            'insertText': {
+                'text': 'Background\n'
+            }
+        })
+        bg = report_data.get("background", "")
         for line in bg.split('. '):
             if line.strip():
-                para = notes_cell.add_paragraph(line.strip() + '.', style='Normal')
-                para.paragraph_format.space_after = Pt(6)
-        
-        # Add spacing before The Ask
-        notes_cell.add_paragraph()
+                requests.append({
+                    'insertText': {
+                        'text': line.strip() + '.\n'
+                    }
+                })
+        requests.append({'insertText': {'text': '\n'}})
         
         # Add The Ask
-        ask_para = notes_cell.add_paragraph()
-        ask_run = ask_para.add_run("The Ask")
-        ask_run.bold = True
-        ask_para.paragraph_format.space_after = Pt(6)
-        
-        # Add ask text with proper breaks and spacing
+        requests.append({
+            'insertText': {
+                'text': 'The Ask\n'
+            }
+        })
+        ask = report_data.get("the_ask", "")
         for line in ask.split('. '):
             if line.strip():
-                para = notes_cell.add_paragraph(line.strip() + '.', style='Normal')
-                para.paragraph_format.space_after = Pt(6)
+                requests.append({
+                    'insertText': {
+                        'text': line.strip() + '.\n'
+                    }
+                })
+        requests.append({'insertText': {'text': '\n'}})
         
-        doc.add_paragraph()
-        
-        # TABLE 3: Actions (2 rows, 1 col)
-        actions_table = doc.add_table(rows=2, cols=1)
-        actions_table.style = 'Table Grid'
-        
-        actions_table.rows[0].cells[0].text = "Actions"
-        
-        # Build actions content
-        actions_cell = actions_table.rows[1].cells[0]
-        actions_cell.text = ""  # Clear default text
-        
+        # Add Actions
+        requests.append({
+            'insertText': {
+                'text': 'Actions\n'
+            }
+        })
         actions = report_data.get("actions", [])
         if actions and isinstance(actions, list):
             for action in actions:
                 action_text = str(action).strip()
                 if action_text:
-                    para = actions_cell.add_paragraph(action_text, style='List Bullet')
-                    para.paragraph_format.space_after = Pt(8)
+                    requests.append({
+                        'insertText': {
+                            'text': f'• {action_text}\n'
+                        }
+                    })
         else:
-            para = actions_cell.add_paragraph("Action items to be determined", style='List Bullet')
-            para.paragraph_format.space_after = Pt(8)
+            requests.append({
+                'insertText': {
+                    'text': '• Action items to be determined\n'
+                }
+            })
+        requests.append({'insertText': {'text': '\n'}})
         
-        doc.add_paragraph()
-        
-        # TABLE 4: Key Points (2 rows, 1 col)
-        key_points_table = doc.add_table(rows=2, cols=1)
-        key_points_table.style = 'Table Grid'
-        
-        key_points_table.rows[0].cells[0].text = "Key Points"
-        
-        # Build key points content
-        key_points_cell = key_points_table.rows[1].cells[0]
-        key_points_cell.text = ""  # Clear default text
-        
+        # Add Key Points
+        requests.append({
+            'insertText': {
+                'text': 'Key Points\n'
+            }
+        })
         key_points = report_data.get("key_points", [])
         if key_points and isinstance(key_points, list):
             for point in key_points:
                 point_text = str(point).strip()
                 if point_text:
-                    para = key_points_cell.add_paragraph(point_text, style='List Bullet')
-                    para.paragraph_format.space_after = Pt(8)
+                    requests.append({
+                        'insertText': {
+                            'text': f'• {point_text}\n'
+                        }
+                    })
         else:
-            para = key_points_cell.add_paragraph("Key discussion points", style='List Bullet')
-            para.paragraph_format.space_after = Pt(8)
+            requests.append({
+                'insertText': {
+                    'text': '• Key discussion points\n'
+                }
+            })
+        requests.append({'insertText': {'text': '\n'}})
         
-        doc.add_paragraph()
+        # Add AOB
+        requests.append({
+            'insertText': {
+                'text': 'AOB\n[Additional notes or follow-up items]\n'
+            }
+        })
         
-        # TABLE 5: AOB (2 rows, 1 col)
-        aob_table = doc.add_table(rows=2, cols=1)
-        aob_table.style = 'Table Grid'
+        # Execute all requests
+        docs_service.documents().batchUpdate(
+            documentId=doc_id,
+            body={'requests': requests}
+        ).execute()
         
-        aob_table.rows[0].cells[0].text = "AOB"
-        aob_table.rows[1].cells[0].text = "[Additional notes or follow-up items]"
+        # Get the sharing link
+        doc_link = f"https://docs.google.com/document/d/{doc_id}/edit?usp=sharing"
         
-        # Save document
-        temp_dir = tempfile.gettempdir()
-        filename = f"{datetime.now().strftime('%Y-%m-%d')}_ContactReport_{workflow.client_name.replace(' ', '_')}.docx"
-        doc_path = os.path.join(temp_dir, filename)
-        doc.save(doc_path)
+        logger.info(f"Google Doc created: {doc_link}")
+        return doc_link
         
-        return doc_path, filename
     except Exception as e:
-        logger.error(f"Document creation error: {str(e)}")
+        logger.error(f"Google Doc creation error: {str(e)}")
         raise
         
         # TABLE 1: Header info (2 rows, 3 cols)
@@ -567,26 +570,19 @@ def handle_message_events(body, say, logger):
             say("✍️ Generating report with Claude...")
             report_data = generate_report_with_claude(content, workflow)
             
-            say("📝 Creating Word document...")
-            doc_path, filename = create_word_document(workflow, report_data)
+            say("📝 Creating Google Doc...")
+            doc_link = create_google_doc(workflow, report_data)
             
-            # Upload to Slack
-            say("📤 Uploading report to Slack...")
-            with open(doc_path, 'rb') as f:
-                app.client.files_upload_v2(
-                    channel=channel,
-                    file=f,
-                    filename=filename,
-                    title=f"Contact Report: {workflow.client_name}",
-                    initial_comment=f"✅ Contact Report Generated\n\n📋 {workflow.attendees[0] if workflow.attendees else 'Meeting'} | {workflow.client_name}\n📅 {workflow.project_name}"
-                )
+            # Post link to Slack
+            say(f"✅ Contact Report Generated\n\n"
+                f"📋 {workflow.attendees[0] if workflow.attendees else 'Meeting'} | {workflow.client_name}\n"
+                f"📅 {workflow.project_name}\n\n"
+                f"<{doc_link}|📄 View Report in Google Docs>")
             
             # Cleanup
             del active_workflows[workflow_key]
             if os.path.exists(file_path):
                 os.remove(file_path)
-            if os.path.exists(doc_path):
-                os.remove(doc_path)
         
         except Exception as e:
             logger.error(f"File processing error: {str(e)}")
