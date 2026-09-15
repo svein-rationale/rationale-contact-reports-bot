@@ -182,58 +182,52 @@ Respond ONLY with valid JSON in this format:
             ]
         )
         
-        # Safely extract text from response
-        response_text = None
-        if message.content and len(message.content) > 0:
-            first_block = message.content[0]
-            if hasattr(first_block, 'text'):
-                response_text = first_block.text
+        # Debug: Log the response structure
+        logger.info(f"Claude response type: {type(message)}")
+        logger.info(f"Claude content: {message.content}")
         
-        # If we couldn't get text, return fallback
+        # Extract text from response
+        response_text = None
+        if message.content:
+            logger.info(f"Content length: {len(message.content)}")
+            for i, block in enumerate(message.content):
+                logger.info(f"Block {i}: type={type(block)}, has_text={hasattr(block, 'text')}")
+                if hasattr(block, 'text') and block.text:
+                    response_text = block.text
+                    logger.info(f"Found text in block {i}: {response_text[:100]}...")
+                    break
+        
+        # If no text found, try to use the first block as string
+        if not response_text and message.content:
+            try:
+                response_text = str(message.content[0])
+                logger.info(f"Using str() conversion: {response_text[:100]}...")
+            except:
+                pass
+        
         if not response_text:
-            logger.warning("Could not extract text from Claude response, using fallback")
-            return {
-                "background": "Meeting notes analyzed",
-                "the_ask": "See meeting content for specific details",
-                "actions": ["Review meeting notes", "Follow up with client"],
-                "key_points": []
-            }
+            logger.error("Could not extract any text from Claude response")
+            raise Exception("No text extracted from Claude response")
         
         # Parse JSON from response
         json_start = response_text.find('{')
         json_end = response_text.rfind('}') + 1
         
         if json_start < 0 or json_end <= json_start:
-            logger.warning("Could not find JSON in Claude response")
-            return {
-                "background": "Meeting notes analyzed",
-                "the_ask": "See meeting content for specific details",
-                "actions": ["Review meeting notes", "Follow up with client"],
-                "key_points": []
-            }
+            logger.error(f"Could not find JSON. Response text: {response_text[:200]}")
+            raise Exception("Could not find JSON in response")
         
         json_str = response_text[json_start:json_end]
+        logger.info(f"Extracted JSON: {json_str[:200]}...")
         
-        try:
-            return json.loads(json_str)
-        except json.JSONDecodeError as e:
-            logger.warning(f"JSON parsing error, using fallback: {str(e)}")
-            return {
-                "background": "Meeting notes analyzed",
-                "the_ask": "See meeting content for specific details",
-                "actions": ["Review meeting notes", "Follow up with client"],
-                "key_points": []
-            }
+        return json.loads(json_str)
         
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON parsing error: {str(e)}")
+        raise
     except Exception as e:
         logger.error(f"Claude API error: {str(e)}")
-        # Return fallback instead of failing
-        return {
-            "background": "Meeting notes provided",
-            "the_ask": "See meeting content for specific details",
-            "actions": ["Review meeting notes", "Follow up with client"],
-            "key_points": []
-        }
+        raise
 
 
 def create_word_document(workflow, report_data):
