@@ -182,27 +182,12 @@ Respond ONLY with valid JSON in this format:
             ]
         )
         
-        if not message.content or len(message.content) == 0:
-    raise Exception("Empty response from Claude")
-
-# Get the text from the response
-if not hasattr(message.content[0], 'text') or message.content[0].text is None:
-    # If no text, return basic structure
-    return {
-        "background": "Meeting notes provided",
-        "the_ask": "See meeting content for details",
-        "actions": ["Review meeting notes", "Follow up"],
-        "key_points": []
-    }
-
-response_text = message.content[0].text.strip()
-if not response_text:
-    return {
-        "background": "Meeting notes provided",
-        "the_ask": "See meeting content for details",
-        "actions": ["Review meeting notes", "Follow up"],
-        "key_points": []
-    }
+        if not message.content:
+            raise Exception("Empty response from Claude")
+        
+        response_text = message.content[0].text
+        if not response_text:
+            raise Exception("No text in Claude response")
         
         # Parse JSON from response
         json_start = response_text.find('{')
