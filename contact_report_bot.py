@@ -183,9 +183,15 @@ Respond ONLY with valid JSON in this format:
         if not message.content:
             raise Exception("Empty response from Claude")
         
-        response_text = message.content[0].text
+        # Find the text block (skip thinking blocks)
+        response_text = None
+        for block in message.content:
+            if hasattr(block, 'type') and block.type == 'text' and hasattr(block, 'text'):
+                response_text = block.text
+                break
+        
         if not response_text:
-            raise Exception("No text in Claude response")
+            raise Exception("No text block found in Claude response")
         
         # Parse JSON from response
         json_start = response_text.find('{')
