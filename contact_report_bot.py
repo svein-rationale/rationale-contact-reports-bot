@@ -377,7 +377,7 @@ def handle_contact_report_command(ack, body, say):
     say(f"📋 Starting Contact Report for: *{workflow.client_name}*\n\n"
         f"Step 1/5: What's the project name?")
 
-@app.message(re=r".*")
+   @app.message(re=r".*")
 def handle_message_events(message, say, logger):
     """Handle message events including file uploads"""
     
