@@ -8,7 +8,7 @@ import json
 from datetime import datetime
 from slack_bolt import App
 from slack_bolt.adapter.flask import SlackRequestHandler
-from flask import Flask
+from flask import Flask, request
 import anthropic
 from google.oauth2.service_account import Credentials
 from google.auth.transport.requests import Request
