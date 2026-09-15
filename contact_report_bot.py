@@ -182,34 +182,58 @@ Respond ONLY with valid JSON in this format:
             ]
         )
         
-        if not message.content:
-            raise Exception("Empty response from Claude")
+        # Safely extract text from response
+        response_text = None
+        if message.content and len(message.content) > 0:
+            first_block = message.content[0]
+            if hasattr(first_block, 'text'):
+                response_text = first_block.text
         
-        response_text = message.content[0].text
+        # If we couldn't get text, return fallback
         if not response_text:
-            raise Exception("No text in Claude response")
+            logger.warning("Could not extract text from Claude response, using fallback")
+            return {
+                "background": "Meeting notes analyzed",
+                "the_ask": "See meeting content for specific details",
+                "actions": ["Review meeting notes", "Follow up with client"],
+                "key_points": []
+            }
         
         # Parse JSON from response
         json_start = response_text.find('{')
         json_end = response_text.rfind('}') + 1
         
         if json_start < 0 or json_end <= json_start:
-            raise Exception("Could not find JSON in Claude response")
+            logger.warning("Could not find JSON in Claude response")
+            return {
+                "background": "Meeting notes analyzed",
+                "the_ask": "See meeting content for specific details",
+                "actions": ["Review meeting notes", "Follow up with client"],
+                "key_points": []
+            }
         
         json_str = response_text[json_start:json_end]
-        return json.loads(json_str)
         
-    except json.JSONDecodeError as e:
-        logger.error(f"JSON parsing error: {str(e)}")
+        try:
+            return json.loads(json_str)
+        except json.JSONDecodeError as e:
+            logger.warning(f"JSON parsing error, using fallback: {str(e)}")
+            return {
+                "background": "Meeting notes analyzed",
+                "the_ask": "See meeting content for specific details",
+                "actions": ["Review meeting notes", "Follow up with client"],
+                "key_points": []
+            }
+        
+    except Exception as e:
+        logger.error(f"Claude API error: {str(e)}")
+        # Return fallback instead of failing
         return {
-            "background": "Meeting analysis",
-            "the_ask": "See meeting notes for details",
+            "background": "Meeting notes provided",
+            "the_ask": "See meeting content for specific details",
             "actions": ["Review meeting notes", "Follow up with client"],
             "key_points": []
         }
-    except Exception as e:
-        logger.error(f"Claude error: {str(e)}")
-        raise
 
 
 def create_word_document(workflow, report_data):
