@@ -209,67 +209,86 @@ Respond ONLY with valid JSON in this format:
 
 
 def create_word_document(workflow, report_data):
-    """Create branded Word document"""
+    """Create branded Word document matching template layout"""
     try:
         doc = Document()
         
-        # Create header table
-        header_table = doc.add_table(rows=2, cols=4)
-        header_table.style = 'Light Grid Accent 1'
+        # Add some spacing
+        doc.add_paragraph()
+        doc.add_paragraph()
         
-        # Row 1: Client and Project
-        cells = header_table.rows[0].cells
-        cells[0].text = "Client"
-        cells[1].text = workflow.client_name
-        cells[2].text = "Project Name"
-        cells[3].text = workflow.project_name or "N/A"
+        # TABLE 1: Header info (2 rows, 3 cols)
+        header_table = doc.add_table(rows=2, cols=3)
+        header_table.style = 'Table Grid'
         
-        # Row 2: Meeting details
-        cells = header_table.rows[1].cells
-        cells[0].text = "Meeting"
-        meeting_date = datetime.now().strftime("%Y-%m-%d %H:%M")
+        # Row 1: Client, Project Name, Meeting
+        row1_cells = header_table.rows[0].cells
+        row1_cells[0].text = f"Client:\n{workflow.client_name}"
+        row1_cells[1].text = f"Project Name:\n{workflow.project_name or 'N/A'}"
+        meeting_date = datetime.now().strftime("%d/%m/%Y")
         attendees_str = ", ".join(workflow.attendees) if workflow.attendees else "N/A"
-        cells[1].text = f"{meeting_date} | {attendees_str}"
-        cells[2].text = "Project AM"
-        cells[3].text = workflow.project_am or "N/A"
+        row1_cells[2].text = f"Meeting:\n[{meeting_date} & {attendees_str}]"
+        
+        # Row 2: Project AM, Senior Oversight, Meeting
+        row2_cells = header_table.rows[1].cells
+        row2_cells[0].text = f"Project AM:\n{workflow.project_am or 'N/A'}"
+        row2_cells[1].text = f"Senior Oversight:\n{workflow.senior_oversight or 'N/A'}"
+        row2_cells[2].text = f"Meeting:\n[Date & Attendees]"
         
         doc.add_paragraph()
         
-        # Meeting notes section
-        doc.add_heading("Meeting Notes", level=2)
-        doc.add_paragraph("[Meeting transcript extracted and analyzed]")
+        # TABLE 2: Meeting Notes & Background & The Ask (2 rows, 1 col)
+        notes_table = doc.add_table(rows=2, cols=1)
+        notes_table.style = 'Table Grid'
         
-        # Background section
-        doc.add_heading("Background", level=2)
+        notes_table.rows[0].cells[0].text = "Meeting notes"
+        
+        # Build content for row 2
         bg = report_data.get("background", "")
-        doc.add_paragraph(bg if bg else "Client background and context")
-        
-        # The Ask section
-        doc.add_heading("The Ask", level=2)
         ask = report_data.get("the_ask", "")
-        doc.add_paragraph(ask if ask else "Client request details")
+        notes_content = f"Background\n\n{bg}\n\nThe Ask\n\n{ask}"
+        notes_table.rows[1].cells[0].text = notes_content
         
-        # Actions section
-        doc.add_heading("Actions", level=2)
+        doc.add_paragraph()
+        
+        # TABLE 3: Actions (2 rows, 1 col)
+        actions_table = doc.add_table(rows=2, cols=1)
+        actions_table.style = 'Table Grid'
+        
+        actions_table.rows[0].cells[0].text = "Actions"
+        
+        # Build actions content
         actions = report_data.get("actions", [])
         if actions and isinstance(actions, list):
-            for action in actions:
-                doc.add_paragraph(str(action), style='List Bullet')
+            actions_content = "\n".join([f"• {str(action)}" for action in actions])
         else:
-            doc.add_paragraph("Action items to be determined", style='List Bullet')
+            actions_content = "• Action items to be determined"
+        actions_table.rows[1].cells[0].text = actions_content
         
-        # Key Points section
-        doc.add_heading("Key Points", level=2)
+        doc.add_paragraph()
+        
+        # TABLE 4: Key Points (2 rows, 1 col)
+        key_points_table = doc.add_table(rows=2, cols=1)
+        key_points_table.style = 'Table Grid'
+        
+        key_points_table.rows[0].cells[0].text = "Key Points"
+        
+        # Build key points content
         key_points = report_data.get("key_points", [])
         if key_points and isinstance(key_points, list):
-            for point in key_points:
-                doc.add_paragraph(str(point), style='List Bullet')
+            key_points_content = "\n".join([f"• {str(point)}" for point in key_points])
         else:
-            doc.add_paragraph("Key discussion points", style='List Bullet')
+            key_points_content = "• Key discussion points"
+        key_points_table.rows[1].cells[0].text = key_points_content
         
-        # AOB section
-        doc.add_heading("AOB", level=2)
-        doc.add_paragraph("Additional notes or follow-up items")
+        doc.add_paragraph()
+        
+        # TABLE 5: AOB (2 rows, 1 col)
+        aob_table = doc.add_table(rows=2, cols=1)
+        aob_table.style = 'Table Grid'
+        
+        aob_table.rows[0].cells[0].text = "AOB"
+        aob_table.rows[1].cells[0].text = "[Additional notes or follow-up items]"
         
         # Save document
         temp_dir = tempfile.gettempdir()
