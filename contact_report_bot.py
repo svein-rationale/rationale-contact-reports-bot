@@ -164,7 +164,7 @@ Respond ONLY in JSON format:
 {{"background": "...", "the_ask": "...", "actions": ["...", "..."], "key_points": ["...", "..."]}}"""
 
         message = anthropic_client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-5",
             max_tokens=2000,
             messages=[{"role": "user", "content": prompt}]
         )
