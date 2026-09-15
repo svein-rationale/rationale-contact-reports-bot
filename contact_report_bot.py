@@ -1,6 +1,7 @@
 """
 Claude Contact Reports Bot for Slack
 Generates professional contact reports from meeting files using Claude AI
+Supports: DOCX, PDF, TXT files
 """
 
 import os
@@ -20,6 +21,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Initialize apps
 app = App(
     token=os.environ.get("SLACK_BOT_TOKEN"),
     signing_secret=os.environ.get("SLACK_SIGNING_SECRET")
@@ -29,6 +31,7 @@ flask_app = Flask(__name__)
 handler = SlackRequestHandler(app)
 anthropic_client = Anthropic(api_key=os.environ.get("CLAUDE_API_KEY"))
 
+# Team data
 TEAM_DATA = {
     "account_managers": [
         "Svein Clouston",
@@ -56,6 +59,7 @@ TEAM_DATA = {
 active_workflows = {}
 
 class ContactReportWorkflow:
+    """Manages workflow state for a contact report"""
     def __init__(self, channel, channel_name):
         self.channel = channel
         self.channel_name = channel_name
@@ -74,6 +78,7 @@ class ContactReportWorkflow:
                 return value
         return channel_clean
 
+
 def download_slack_file(file_id, file_name, token):
     """Download file from Slack"""
     try:
@@ -84,11 +89,11 @@ def download_slack_file(file_id, file_name, token):
         
         file_info = response.json()
         if not file_info.get("ok"):
-            raise Exception(f"Slack error: {file_info.get('error')}")
+            raise Exception(f"Slack API error: {file_info.get('error')}")
         
         download_url = file_info.get("file", {}).get("url_private")
         if not download_url:
-            raise Exception("No download URL found")
+            raise Exception("Could not find download URL for file")
         
         file_response = requests.get(download_url, headers=headers)
         file_response.raise_for_status()
@@ -104,6 +109,7 @@ def download_slack_file(file_id, file_name, token):
         logger.error(f"Download error: {str(e)}")
         raise
 
+
 def extract_text_from_docx(file_path):
     """Extract text from DOCX/DOC file"""
     try:
@@ -115,27 +121,28 @@ def extract_text_from_docx(file_path):
         return text.strip() if text else "[No text found in document]"
     except Exception as e:
         logger.error(f"DOCX extraction error: {str(e)}")
-        raise
+        raise Exception(f"Failed to extract from DOCX: {str(e)}")
+
 
 def extract_text_from_pdf(file_path):
     """Extract text from PDF file"""
     try:
-        try:
-            import PyPDF2
-        except ImportError:
-            return "[PDF extraction requires PyPDF2 library]"
-        
+        import PyPDF2
         text = ""
         with open(file_path, 'rb') as file:
             pdf_reader = PyPDF2.PdfReader(file)
             for page_num in range(len(pdf_reader.pages)):
                 page = pdf_reader.pages[page_num]
-                text += page.extract_text() + "\n"
-        
+                page_text = page.extract_text()
+                if page_text:
+                    text += page_text + "\n"
         return text.strip() if text else "[No text found in PDF]"
+    except ImportError:
+        raise Exception("PyPDF2 library not installed")
     except Exception as e:
         logger.error(f"PDF extraction error: {str(e)}")
-        raise
+        raise Exception(f"Failed to extract from PDF: {str(e)}")
+
 
 def extract_text_from_txt(file_path):
     """Extract text from plain text file"""
@@ -145,49 +152,58 @@ def extract_text_from_txt(file_path):
         return text.strip() if text else "[No text found in file]"
     except Exception as e:
         logger.error(f"Text extraction error: {str(e)}")
-        raise
+        raise Exception(f"Failed to read text file: {str(e)}")
+
 
 def generate_report_with_claude(content, workflow):
-    """Use Claude to generate meeting insights"""
+    """Use Claude to generate meeting report"""
     try:
         prompt = f"""You are a professional business analyst. Extract the following from this meeting content:
 
 1. Background: Client's current situation, challenges, and context
-2. The Ask: What they're requesting, timeline, budget, decision process
-3. Actions: Next steps and action items (as bullet points)
-4. Key Points: Important discussion topics (as bullet points)
+2. The Ask: What they're requesting, timeline, budget, decision process if mentioned
+3. Actions: Next steps and action items (list as bullet points)
+4. Key Points: Important discussion topics (list as bullet points)
 
 Meeting Content:
 {content}
 
-Respond ONLY in JSON format:
-{{"background": "...", "the_ask": "...", "actions": ["...", "..."], "key_points": ["...", "..."]}}"""
+Respond ONLY with valid JSON in this format:
+{{"background": "...", "the_ask": "...", "actions": ["action1", "action2"], "key_points": ["point1", "point2"]}}"""
 
         message = anthropic_client.messages.create(
             model="claude-sonnet-5",
             max_tokens=2000,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ]
         )
         
-        if not message.content or not message.content[0].text:
-    raise Exception("Empty response from Claude")
-
-response_text = message.content[0].text
-if not response_text:
-    raise Exception("No text in response")
-
-json_start = response_text.find('{')
-json_end = response_text.rfind('}') + 1
-if json_start >= 0 and json_end > json_start:
-    json_str = response_text[json_start:json_end]
-    try:
-        return json.loads(json_str)
-    except json.JSONDecodeError:
-        pass
+        if not message.content:
+            raise Exception("Empty response from Claude")
         
+        response_text = message.content[0].text
+        if not response_text:
+            raise Exception("No text in Claude response")
+        
+        # Parse JSON from response
+        json_start = response_text.find('{')
+        json_end = response_text.rfind('}') + 1
+        
+        if json_start < 0 or json_end <= json_start:
+            raise Exception("Could not find JSON in Claude response")
+        
+        json_str = response_text[json_start:json_end]
+        return json.loads(json_str)
+        
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON parsing error: {str(e)}")
         return {
             "background": "Meeting analysis",
-            "the_ask": "See notes for details",
+            "the_ask": "See meeting notes for details",
             "actions": ["Review meeting notes", "Follow up with client"],
             "key_points": []
         }
@@ -195,20 +211,24 @@ if json_start >= 0 and json_end > json_start:
         logger.error(f"Claude error: {str(e)}")
         raise
 
+
 def create_word_document(workflow, report_data):
     """Create branded Word document"""
     try:
         doc = Document()
         
+        # Create header table
         header_table = doc.add_table(rows=2, cols=4)
         header_table.style = 'Light Grid Accent 1'
         
+        # Row 1: Client and Project
         cells = header_table.rows[0].cells
         cells[0].text = "Client"
         cells[1].text = workflow.client_name
         cells[2].text = "Project Name"
-        cells[3].text = workflow.project_name
+        cells[3].text = workflow.project_name or "N/A"
         
+        # Row 2: Meeting details
         cells = header_table.rows[1].cells
         cells[0].text = "Meeting"
         meeting_date = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -218,36 +238,44 @@ def create_word_document(workflow, report_data):
         cells[3].text = workflow.project_am or "N/A"
         
         doc.add_paragraph()
-        doc.add_heading("Meeting Notes", level=2)
-        doc.add_paragraph("[Meeting notes extracted and analyzed]")
         
+        # Meeting notes section
+        doc.add_heading("Meeting Notes", level=2)
+        doc.add_paragraph("[Meeting notes and transcript extracted]")
+        
+        # Background section
         doc.add_heading("Background", level=2)
         bg = report_data.get("background", "")
         doc.add_paragraph(bg if bg else "Client background and context")
         
+        # The Ask section
         doc.add_heading("The Ask", level=2)
         ask = report_data.get("the_ask", "")
         doc.add_paragraph(ask if ask else "Client request details")
         
+        # Actions section
         doc.add_heading("Actions", level=2)
         actions = report_data.get("actions", [])
-        if actions:
+        if actions and isinstance(actions, list):
             for action in actions:
-                doc.add_paragraph(action, style='List Bullet')
+                doc.add_paragraph(str(action), style='List Bullet')
         else:
             doc.add_paragraph("Action items to be determined", style='List Bullet')
         
+        # Key Points section
         doc.add_heading("Key Points", level=2)
         key_points = report_data.get("key_points", [])
-        if key_points:
+        if key_points and isinstance(key_points, list):
             for point in key_points:
-                doc.add_paragraph(point, style='List Bullet')
+                doc.add_paragraph(str(point), style='List Bullet')
         else:
             doc.add_paragraph("Key discussion points", style='List Bullet')
         
+        # AOB section
         doc.add_heading("AOB", level=2)
         doc.add_paragraph("Additional notes or follow-up items")
         
+        # Save document
         temp_dir = tempfile.gettempdir()
         filename = f"{datetime.now().strftime('%Y-%m-%d')}_ContactReport_{workflow.client_name.replace(' ', '_')}.docx"
         doc_path = os.path.join(temp_dir, filename)
@@ -258,12 +286,14 @@ def create_word_document(workflow, report_data):
         logger.error(f"Document creation error: {str(e)}")
         raise
 
+
 def get_google_drive_service():
     """Get authorized Google Drive service"""
     try:
         credentials_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
         if not credentials_json:
-            raise Exception("No Google credentials")
+            raise Exception("Google credentials not found in environment")
+        
         credentials_dict = json.loads(credentials_json)
         credentials = Credentials.from_service_account_info(
             credentials_dict,
@@ -275,11 +305,13 @@ def get_google_drive_service():
         logger.error(f"Drive service error: {str(e)}")
         raise
 
+
 def upload_to_google_drive(doc_path, workflow):
     """Upload document to Google Drive"""
     try:
         service = get_google_drive_service()
         
+        # Find Contact Reports folder
         results = service.files().list(
             q="name='Contact Reports' and mimeType='application/vnd.google-apps.folder'",
             spaces='drive',
@@ -289,16 +321,20 @@ def upload_to_google_drive(doc_path, workflow):
         
         folders = results.get('files', [])
         if not folders:
-            raise Exception("Contact Reports folder not found")
+            raise Exception("Contact Reports folder not found in Google Drive")
         
         folder_id = folders[0]['id']
         
+        # Upload file
         file_metadata = {
             'name': os.path.basename(doc_path),
             'parents': [folder_id]
         }
         
-        media = discovery.MediaFileUpload(doc_path, mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+        media = discovery.MediaFileUpload(
+            doc_path,
+            mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        )
         
         file = service.files().create(
             body=file_metadata,
@@ -311,9 +347,10 @@ def upload_to_google_drive(doc_path, workflow):
         logger.error(f"Drive upload error: {str(e)}")
         raise
 
+
 @app.command("/contact-report")
 def handle_contact_report_command(ack, body, say):
-    """Handle /contact-report command"""
+    """Handle /contact-report slash command"""
     ack()
     
     channel = body["channel_id"]
@@ -326,11 +363,13 @@ def handle_contact_report_command(ack, body, say):
     
     say(f"📋 Starting Contact Report for: *{workflow.client_name}*\n\nStep 1/5: What's the project name?")
 
+
 @app.event("message")
 def handle_message_events(body, say, logger):
-    """Handle message events including file uploads"""
+    """Handle all message events"""
     event = body.get("event", {})
     
+    # Skip bot messages
     if event.get("bot_id"):
         return
     
@@ -354,6 +393,7 @@ def handle_message_events(body, say, logger):
             file_id = file_info.get("id")
             file_name = file_info.get("name")
             
+            # Only process if waiting for file
             if workflow.state != "awaiting_file":
                 return
             
@@ -379,21 +419,18 @@ def handle_message_events(body, say, logger):
                 return
             
             say("✍️ Generating report with Claude...")
-            
-            # Generate report
             report_data = generate_report_with_claude(content, workflow)
             
-            # Create document
             say("📝 Creating Word document...")
             doc_path = create_word_document(workflow, report_data)
             
-            # Upload to Drive
             say("☁️ Uploading to Google Drive...")
             drive_link = upload_to_google_drive(doc_path, workflow)
             
-            # Success
+            # Success!
+            attendee = workflow.attendees[0] if workflow.attendees else "Meeting"
             say(f"✅ Contact Report Generated\n\n"
-                f"📋 {workflow.attendees[0] if workflow.attendees else 'Meeting'} | {workflow.client_name}\n"
+                f"📋 {attendee} | {workflow.client_name}\n"
                 f"📅 {workflow.project_name}\n\n"
                 f"<{drive_link}|📁 View Report in Google Drive>")
             
@@ -406,7 +443,7 @@ def handle_message_events(body, say, logger):
         
         except Exception as e:
             logger.error(f"File processing error: {str(e)}")
-            say(f"❌ Error processing file: {str(e)}")
+            say(f"❌ Error: {str(e)}")
         
         return
     
@@ -442,9 +479,11 @@ def handle_message_events(body, say, logger):
         workflow.state = "awaiting_file"
         say("✅ Got it! Now upload the meeting file:\n📄 DOCX, PDF, or TXT\n\nJust drag & drop or attach.")
 
+
 @flask_app.route("/slack/events", methods=["POST"])
 def slack_events():
     return handler.handle(request)
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 3000))
