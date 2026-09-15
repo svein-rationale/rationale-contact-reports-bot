@@ -448,7 +448,7 @@ This changes the decorator from @app.message() to @app.event("message"), which p
 
 Once committed, Railway redeploys and try the file upload again!
 
-Write a message…
+Write a message
     """Handle message events including file uploads"""
     
     # Skip bot messages
