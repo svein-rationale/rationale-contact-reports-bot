@@ -173,7 +173,7 @@ Respond ONLY with valid JSON in this format:
 
         message = anthropic_client.messages.create(
             model="claude-sonnet-5",
-            max_tokens=2000,
+            max_tokens=4000,
             messages=[
                 {
                     "role": "user",
