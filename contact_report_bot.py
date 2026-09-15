@@ -15,7 +15,7 @@ from slack_bolt.adapter.flask import SlackRequestHandler
 from anthropic import Anthropic
 from google.oauth2.service_account import Credentials
 from google.auth.transport.requests import Request
-from google.api_python_client import discovery
+from googleapiclient import discovery
 from docx import Document
 from docx.shared import Pt, RGBColor, Inches
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
