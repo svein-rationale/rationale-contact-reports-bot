@@ -15,6 +15,7 @@ from slack_bolt.adapter.flask import SlackRequestHandler
 from anthropic import Anthropic
 from google.oauth2.service_account import Credentials
 from googleapiclient import discovery
+from docx import Document
 import logging
 
 logging.basicConfig(level=logging.INFO)
